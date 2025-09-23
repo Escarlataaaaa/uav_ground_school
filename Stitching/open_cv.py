@@ -8,6 +8,7 @@ os.makedirs(output_folder, exist_ok=True)
 
 KEEP_EVERY = 10
 USE_SCANS = True
+OUT_PATH   = "map.jpg"
 
 def frame_reader(video_path, keep_every=10, save_dir=None):
     cap = cv2.VideoCapture(video_path)
@@ -25,25 +26,34 @@ def frame_reader(video_path, keep_every=10, save_dir=None):
             images.append(frame)
             if save_dir is not None:
                 out_path = os.path.join(save_dir, f"frame_{i:05d}.jpg")
-                cv2.imwrite(out_path, frame)
-            ok_write = cv2.imwrite(out_path, frame)
-            if ok_write:
-                saved += 1
-            else:
-                print(f"[WARN] Failed to write: {out_path}")
-
-
+                if cv2.imwrite(out_path, frame):
+                    saved += 1
+                else:
+                    print(f"[WARN] failed to write: {out_path}")
         i += 1
     cap.release()
     return images
 
+def sift_extractor():
+    return cv2.SIFT_create(nfeatures=5000)
+    
+def detect_and_describe(image, sift):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    keypoints, descriptors = sift.detectAndCompute(gray, None)
+    return keypoints, descriptors
 
-def stitch(images):
-    stitcher = cv2.Stitcher_create()
-    status, stitched_image = stitcher.stitch(images)
+def match_descriptors(descA, descB, ratio=0.75):
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+    raw = bf.knnMatch(descA, descB, k=2)
+    return [m for m,n in raw if m.distance < ratio * n.distance]
+
+def stitch(images, scans=False):
+    mode = cv2.Stitcher_SCANS if scans else cv2.Stitcher_PANORAMA
+    stitcher = cv2.Stitcher_create(mode)
+    status, pano = stitcher.stitch(images)
 
     if status == cv2.Stitcher_OK:
-        return
+        return pano
     elif status == cv2.Stitcher_ERR_NEED_MORE_IMGS:
         print("Not enough images for stitching")
     elif status == cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL:
@@ -51,4 +61,9 @@ def stitch(images):
     else:
         print("Image stitching failed")
 
-frame_reader(video_path, KEEP_EVERY, output_folder)
+
+if __name__ == "__main__":
+    frames = frame_reader(video_path, keep_every=KEEP_EVERY, save_dir=output_folder)
+    pano = stitch(frames, scans=USE_SCANS)
+    cv2.imwrite(OUT_PATH, pano)
+    print(f"[DONE] saved mosaic: {os.path.abspath(OUT_PATH)}")
